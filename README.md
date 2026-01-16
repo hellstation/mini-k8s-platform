@@ -1,5 +1,7 @@
 A mini project to practice Kubernetes and Helm.
 
+![xdd](image.png)
+
 * Manual deployment via Kubernetes YAML
 * Deployment via Helm chart
 * Ingress with a local domain
