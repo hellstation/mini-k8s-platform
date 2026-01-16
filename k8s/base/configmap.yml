@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fofatafo-config
+data:
+  SITE_TITLE: "My Fofatafo Gallery"
+  IMAGE_PATH: "/images"

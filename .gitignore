@@ -1,0 +1,5 @@
+# Ignore kube configs
+.kube/
+*.log
+*.tmp
+.DS_Store
