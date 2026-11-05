@@ -1,0 +1,22 @@
+1. Application URL:
+{{- if .Values.ingress.enabled }}
+  http://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+
+  On minikube:
+    minikube addons enable ingress
+    sudo minikube tunnel
+{{- else if eq .Values.service.type "NodePort" }}
+  minikube service {{ include "web-app.fullname" . }} -n {{ .Release.Namespace }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "web-app.fullname" . }} 8080:{{ .Values.service.port }}
+  then open http://127.0.0.1:8080
+{{- end }}
+
+2. Watch the rollout:
+  kubectl get pods -n {{ .Release.Namespace }} -w
+
+{{- if .Values.hpa.enabled }}
+3. HPA needs metrics-server:
+  minikube addons enable metrics-server
+  kubectl get hpa -n {{ .Release.Namespace }}
+{{- end }}

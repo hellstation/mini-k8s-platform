@@ -1,3 +1,6 @@
+nameOverride: fofatafo
+fullnameOverride: ""
+
 replicaCount: 2
 
 image:
@@ -8,12 +11,15 @@ image:
 service:
   type: ClusterIP
   port: 80
+  targetPort: 80
 
 ingress:
   enabled: true
+  className: nginx
   host: fofatafo.local
   path: /
   pathType: Prefix
+  annotations: {}
 
 resources:
   requests:
@@ -29,17 +35,24 @@ hpa:
   maxReplicas: 5
   targetCPUUtilizationPercentage: 50
 
-# === probes ===
+config:
+  SITE_TITLE: "My Fofatafo Gallery"
+  IMAGE_PATH: "/images"
+
 probes:
   readiness:
     enabled: true
     path: /
-    port: 80
+    port: http
     initialDelaySeconds: 5
     periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
   liveness:
     enabled: true
     path: /
-    port: 80
+    port: http
     initialDelaySeconds: 10
     periodSeconds: 15
+    timeoutSeconds: 2
+    failureThreshold: 3

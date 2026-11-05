@@ -2,7 +2,7 @@
 
 ![xdd](image.png)
 
-* Manual deployment via Kubernetes YAML
+* Manual deployment via Kubernetes YAML + Kustomize
 * Deployment via Helm chart
 * Ingress with a local domain
 * Readiness and Liveness probes
@@ -17,18 +17,23 @@
 ```
 mini-k8s-platform/
 ├── README.md
-├── charts/ 
-│ └── templates/ 
-│ └── web-app/
+├── charts/
+│   └── web-app/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
 ├── k8s/
-│ ├── base/
-│ │ ├── deployment.yaml
-│ │ ├── service.yaml
-│ │ ├── configmap.yaml
-│ │ └── hpa.yaml
-│ └── overlays/
-│ └── minikube/
-│ └── ingress.yaml
+│   ├── base/
+│   │   ├── kustomization.yaml
+│   │   ├── configmap.yaml
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── hpa.yaml
+│   └── overlays/
+│       └── minikube/
+│           ├── kustomization.yaml
+│           ├── namespace.yaml
+│           └── ingress.yaml
 └── .gitignore
 ```
 
@@ -44,7 +49,7 @@ mini-k8s-platform/
 
 ---
 
-## Manual Deployment via YAML
+## Cluster setup
 
 1. Start Minikube:
 
@@ -52,58 +57,50 @@ mini-k8s-platform/
 minikube start
 ```
 
-2. Check cluster status:
-
-```bash
-kubectl get nodes
-```
-
-3. (Optional) Create a namespace:
-
-```bash
-kubectl create namespace platform
-```
-
-4. Apply manifests:
-
-```bash
-kubectl apply -f k8s/base/ -n platform
-kubectl apply -f k8s/overlays/minikube/ -n platform
-```
-
-5. Enable Ingress:
+2. Enable addons (Ingress for the local domain, metrics-server for HPA):
 
 ```bash
 minikube addons enable ingress
+minikube addons enable metrics-server
 ```
 
-6. Add local domain to `/etc/hosts`:
+3. Add the local domain to `/etc/hosts`:
 
 ```
 127.0.0.1 fofatafo.local
 ```
 
-7. Start Minikube tunnel (required for Ingress on Mac):
+Pick **one** of the two deploy paths below. Do not install YAML and Helm at the same time in the same namespace.
+
+---
+
+## Manual Deployment via YAML (Kustomize)
+
+```bash
+kubectl apply -k k8s/overlays/minikube
+```
+
+This creates the `platform` namespace, base workloads, and the minikube Ingress.
+
+Start a tunnel (required for Ingress on Docker Desktop / Mac):
 
 ```bash
 sudo minikube tunnel
 ```
 
-8. Check pods, services, and ingress:
+Check resources:
 
 ```bash
-kubectl get pods -n platform
-kubectl get svc -n platform
-kubectl get ingress -n platform
+kubectl get pods,svc,ingress,hpa -n platform
 ```
 
-9. Open the application in browser:
+Open the application:
 
 ```
 http://fofatafo.local
 ```
 
-> Alternatively, if you want to use NodePort without Ingress:
+Alternatively, skip Ingress and use NodePort:
 
 ```bash
 minikube service fofatafo -n platform
@@ -113,43 +110,41 @@ minikube service fofatafo -n platform
 
 ## Deployment via Helm
 
-1. Go to project root:
+From the project root:
 
 ```bash
-cd charts
+helm install fofatafo ./charts/web-app -n platform --create-namespace
 ```
 
-2. Install the Helm chart:
+Check the release:
 
 ```bash
-helm install fofatafo ./web-app
+helm list -n platform
+kubectl get pods,svc,ingress,hpa -n platform
 ```
 
-3. Check the deployment:
-
-```bash
-helm list
-kubectl get pods
-kubectl get svc
-kubectl get ingress
-```
-
-4. If Ingress is enabled, start tunnel:
+If Ingress is enabled (default), start a tunnel:
 
 ```bash
 sudo minikube tunnel
 ```
 
-5. Open the app:
+Open the app:
 
 ```
 http://fofatafo.local
 ```
 
-6. To upgrade after changes:
+Upgrade after changing `values.yaml`:
 
 ```bash
-helm upgrade fofatafo ./web-app
+helm upgrade fofatafo ./charts/web-app -n platform
+```
+
+Preview rendered manifests without installing:
+
+```bash
+helm template fofatafo ./charts/web-app -n platform
 ```
 
 ---
@@ -159,28 +154,46 @@ helm upgrade fofatafo ./web-app
 * View pod logs:
 
 ```bash
-kubectl logs <pod-name>
+kubectl logs -n platform -l app=fofatafo
 ```
 
-* Execute a shell inside pod:
+* Execute a shell inside a pod:
 
 ```bash
-kubectl exec -it <pod-name> -- /bin/sh
+kubectl exec -n platform -it deploy/fofatafo -- /bin/sh
 ```
 
-* Describe pod and check readiness/liveness:
+* Describe a pod and check readiness/liveness:
 
 ```bash
-kubectl describe pod <pod-name>
+kubectl describe pod -n platform -l app=fofatafo
 ```
 
-* Delete Helm release:
+* Watch HPA:
 
 ```bash
-helm uninstall fofatafo
+kubectl get hpa -n platform -w
 ```
 
-* Clean all resources:
+* Generate load so HPA can scale (metrics-server must be enabled):
+
+```bash
+kubectl run -n platform loadgen --image=busybox --restart=Never -- /bin/sh -c "while true; do wget -q -O- http://fofatafo; done"
+```
+
+* Delete the Helm release:
+
+```bash
+helm uninstall fofatafo -n platform
+```
+
+* Delete the YAML/Kustomize install:
+
+```bash
+kubectl delete -k k8s/overlays/minikube
+```
+
+* Clean the namespace:
 
 ```bash
 kubectl delete namespace platform
@@ -190,22 +203,25 @@ kubectl delete namespace platform
 
 ## Features
 
-* Readiness and Liveness probes check `/` path
-* HPA automatically scales pods based on CPU
-* Local domain `fofatafo.local` for Ingress
-* NodePort available for quick testing via `minikube service`
-* Helm chart is fully parameterized via `values.yaml` (image, replicas, resources, probes)
+* Readiness and liveness probes check `/`
+* HPA scales pods on CPU utilization (target 50%)
+* Local domain `fofatafo.local` via Ingress (`ingressClassName: nginx`)
+* NodePort on the YAML Service for `minikube service`
+* Helm chart is parameterized via `values.yaml` (image, replicas, resources, probes, config, ingress, HPA)
+* Kustomize overlay (`k8s/overlays/minikube`) adds namespace + Ingress on top of `k8s/base`
 
 ---
 
 ## Tips
 
-* On Mac with Docker driver, NodePort is not accessible directly → use `minikube service` or `minikube tunnel`
+* On Mac with the Docker driver, NodePort is not reachable directly — use `minikube service` or `minikube tunnel`
 * Keep the terminal with `minikube tunnel` open while using Ingress
-* Verify that Ingress resolves correctly:
+* HPA stays at `<unknown>` until metrics-server is running and has scraped CPU
+* With HPA enabled, Helm omits `spec.replicas` so the autoscaler owns replica count
+* Verify that the local domain resolves:
+
 ```bash
 ping fofatafo.local
 ```
-Should respond with `127.0.0.1`.
 
----
+It should resolve to `127.0.0.1`.
